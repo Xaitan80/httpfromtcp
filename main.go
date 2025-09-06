@@ -2,7 +2,9 @@ package main
 
 import (
     "bytes"
+    "fmt"
     "io"
+    "net"
     "os"
 )
 
@@ -28,6 +30,8 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
                     }
                     if i := bytes.IndexByte(data, '\n'); i >= 0 {
                         line := append(current, data[:i]...)
+                        // Trim a trailing '\r' to handle CRLF (\r\n)
+                        line = bytes.TrimSuffix(line, []byte{'\r'})
                         // send the assembled line
                         ch <- string(line)
                         current = current[:0]
@@ -51,6 +55,8 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
 
         // flush any remaining partial line
         if len(current) > 0 {
+            // Trim a trailing '\r' if present
+            current = bytes.TrimSuffix(current, []byte{'\r'})
             ch <- string(current)
         }
     }()
@@ -58,21 +64,30 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
 }
 
 func main() {
-    f, err := os.Open("messages.txt")
+    ln, err := net.Listen("tcp", ":42069")
     if err != nil {
-        os.Stderr.Write([]byte("error: " + err.Error() + "\n"))
+        fmt.Println("listen error:", err)
         os.Exit(1)
     }
+    defer ln.Close()
 
-    for line := range getLinesChannel(f) {
-        // write: "read: " + line + "\n" in a single write
-        out := make([]byte, 6+len(line)+1)
-        copy(out, "read: ")
-        copy(out[6:], line)
-        out[len(out)-1] = '\n'
-        if _, werr := os.Stdout.Write(out); werr != nil {
-            os.Stderr.Write([]byte("error: " + werr.Error() + "\n"))
-            os.Exit(1)
+    for {
+        conn, err := ln.Accept()
+        if err != nil {
+            fmt.Println("accept error:", err)
+            continue
         }
+        fmt.Println("accepted connection")
+
+        // Handle each connection concurrently so we keep accepting others.
+        go func(c net.Conn) {
+            defer func() {
+                fmt.Println("closed connection")
+            }()
+            for line := range getLinesChannel(c) {
+                // Print lines exactly, no extra formatting.
+                fmt.Println(line)
+            }
+        }(conn)
     }
 }
