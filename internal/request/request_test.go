@@ -56,6 +56,20 @@ func Test_Good_Request_Line_With_Path_Chunked(t *testing.T) {
 	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
 }
 
+func Test_Good_Request_Line_MaxChunk(t *testing.T) {
+    data := "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n"
+    reader := &chunkReader{
+        data:            data,
+        numBytesPerRead: len(data),
+    }
+    r, err := RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "GET", r.RequestLine.Method)
+    assert.Equal(t, "/", r.RequestLine.RequestTarget)
+    assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+}
+
 func Test_Good_Request_Line(t *testing.T) {
 	r, err := RequestFromReader(strings.NewReader("GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n"))
 	require.NoError(t, err)
