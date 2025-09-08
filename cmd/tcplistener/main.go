@@ -51,6 +51,12 @@ func main() {
                     fmt.Printf("- %s: %s\n", k, r.Headers[k])
                 }
             }
+
+            fmt.Println("Body:")
+            if len(r.Body) > 0 {
+                // Print body as-is
+                fmt.Print(string(r.Body))
+            }
         }(conn)
     }
 }
