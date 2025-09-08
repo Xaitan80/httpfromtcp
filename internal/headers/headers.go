@@ -19,6 +19,12 @@ func (h Headers) Get(key string) string {
     return h[strings.ToLower(key)]
 }
 
+// Set sets or overrides the header key with the provided value.
+// It preserves the key's case, intended for response headers.
+func (h Headers) Set(key, value string) {
+    h[key] = value
+}
+
 // Parse consumes at most one header line from data and updates the map.
 // It returns n (bytes consumed), done (true iff an empty line was found), and err.
 // Behavior:

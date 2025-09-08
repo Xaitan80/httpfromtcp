@@ -1,11 +1,11 @@
 package server
 
 import (
-    "bytes"
     "fmt"
     "net"
     "sync/atomic"
 
+    "github.com/xaitan80/httpfromtcp/internal/headers"
     "github.com/xaitan80/httpfromtcp/internal/request"
     "github.com/xaitan80/httpfromtcp/internal/response"
 )
@@ -60,56 +60,72 @@ func (s *Server) handle(conn net.Conn) {
     defer conn.Close()
     r, err := request.RequestFromReader(conn)
     if err != nil {
-        // On parse error, return 400 with error message
-        _ = writeHandlerError(conn, &HandlerError{Status: response.StatusBadRequest, Message: err.Error() + "\n"})
+        // On parse error, return 400 with plain text error via response.Writer
+        rw := response.NewWriter(conn)
+        _ = rw.WriteStatusLine(response.StatusBadRequest)
+        hdrs := response.GetDefaultHeaders(len(err.Error()) + 1)
+        _ = rw.WriteHeaders(hdrs)
+        _, _ = rw.WriteBody([]byte(err.Error() + "\n"))
         return
     }
 
-    // Buffer for handler response body
-    var buf bytes.Buffer
+    rw := response.NewWriter(conn)
     if s.h != nil {
-        if herr := s.h(r, &buf); herr != nil {
-            _ = writeHandlerError(conn, herr)
+        if herr := s.h(r, rw); herr != nil {
+            // If handler returned an error and hasn't written anything, default error output
+            if !rw.WroteAnything() {
+                _ = writeHandlerError(rw, herr)
+            }
             return
         }
     }
-
-    // Success: write 200 + headers + body
-    _ = response.WriteStatusLine(conn, response.StatusOK)
-    hdrs := response.GetDefaultHeaders(buf.Len())
-    _ = response.WriteHeaders(conn, hdrs)
-    if buf.Len() > 0 {
-        _, _ = conn.Write(buf.Bytes())
+    // If handler didn't write anything, write default empty 200
+    if !rw.WroteAnything() {
+        _ = rw.WriteStatusLine(response.StatusOK)
+        hdrs := response.GetDefaultHeaders(0)
+        _ = rw.WriteHeaders(hdrs)
+        // no body
     }
 }
 
 // Handler is the function signature used to handle requests.
-type Handler func(r *request.Request, w *bytes.Buffer) *HandlerError
+type Handler func(r *request.Request, w *response.Writer) *HandlerError
 
 // HandlerError represents an error returned from a Handler.
 type HandlerError struct {
     Status  response.StatusCode
-    Message string
+    Headers headers.Headers
+    Body    []byte
 }
 
 // writeHandlerError writes a standardized error response.
-func writeHandlerError(w net.Conn, he *HandlerError) error {
+func writeHandlerError(w *response.Writer, he *HandlerError) error {
     if he == nil {
         return nil
     }
     // Write status line
-    if err := response.WriteStatusLine(w, he.Status); err != nil {
+    if err := w.WriteStatusLine(he.Status); err != nil {
         return err
     }
-    body := []byte(he.Message)
-    hdrs := response.GetDefaultHeaders(len(body))
-    if err := response.WriteHeaders(w, hdrs); err != nil {
-        return err
-    }
-    if len(body) > 0 {
-        if _, err := w.Write(body); err != nil {
-            return err
+    body := he.Body
+    hdrs := he.Headers
+    if hdrs == nil {
+        hdrs = response.GetDefaultHeaders(len(body))
+    } else {
+        hdrs.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+        if _, ok := hdrs["Connection"]; !ok {
+            hdrs.Set("Connection", "close")
         }
+        if _, ok := hdrs["Content-Type"]; !ok {
+            hdrs.Set("Content-Type", "text/plain")
+        }
+    }
+    if err := w.WriteHeaders(hdrs); err != nil {
+        return err
+    }
+    _, err := w.WriteBody(body)
+    if err != nil {
+        return err
     }
     return nil
 }
