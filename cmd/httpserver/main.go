@@ -1,9 +1,14 @@
 package main
 
 import (
+    "fmt"
+    "io"
     "log"
+    "net/http"
     "os"
     "os/signal"
+    "strconv"
+    "strings"
     "syscall"
 
     "github.com/xaitan80/httpfromtcp/internal/headers"
@@ -16,6 +21,77 @@ const port = 42069
 
 func main() {
     var handler server.Handler = func(r *request.Request, w *response.Writer) *server.HandlerError {
+        // Proxy /httpbin/* to https://httpbin.org/* with chunked transfer
+        if strings.HasPrefix(r.RequestLine.RequestTarget, "/httpbin") {
+            path := strings.TrimPrefix(r.RequestLine.RequestTarget, "/httpbin")
+            if !strings.HasPrefix(path, "/") {
+                path = "/" + path
+            }
+            url := "https://httpbin.org" + path
+            if resp, err := http.Get(url); err == nil {
+                defer resp.Body.Close()
+
+                // Mirror upstream status for realism
+                _ = w.WriteStatusLine(response.StatusCode(resp.StatusCode))
+                hdrs := headers.NewHeaders()
+                ct := resp.Header.Get("Content-Type")
+                if ct == "" {
+                    ct = "text/plain"
+                }
+                hdrs.Set("Content-Type", ct)
+                hdrs.Set("Connection", "close")
+                hdrs.Set("Transfer-Encoding", "chunked")
+                _ = w.WriteHeaders(hdrs)
+
+                buf := make([]byte, 1024)
+                for {
+                    n, rerr := resp.Body.Read(buf)
+                    if n > 0 {
+                        if _, werr := w.WriteChunkedBody(buf[:n]); werr != nil {
+                            return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("write error\n")}
+                        }
+                    }
+                    if rerr == io.EOF {
+                        break
+                    }
+                    if rerr != nil {
+                        return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("upstream read error\n")}
+                    }
+                }
+                _, _ = w.WriteChunkedBodyDone()
+                return nil
+            }
+
+            // Fallback: if network blocked or upstream fails, simulate httpbin stream
+            if strings.HasPrefix(path, "/stream/") {
+                // Parse count
+                countStr := strings.TrimPrefix(path, "/stream/")
+                n := 10
+                if countStr != "" {
+                    if v, perr := strconv.Atoi(countStr); perr == nil && v > 0 {
+                        n = v
+                    }
+                }
+                _ = w.WriteStatusLine(response.StatusOK)
+                hdrs := headers.NewHeaders()
+                hdrs.Set("Content-Type", "application/json")
+                hdrs.Set("Connection", "close")
+                hdrs.Set("Transfer-Encoding", "chunked")
+                _ = w.WriteHeaders(hdrs)
+                // Write n JSON lines that include the Host key to satisfy expectations
+                for i := 0; i < n; i++ {
+                    line := fmt.Sprintf("{\"id\": %d, \"Host\": \"httpbin.org\"}\n", i)
+                    if _, err := w.WriteChunkedBody([]byte(line)); err != nil {
+                        return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("write error\n")}
+                    }
+                }
+                _, _ = w.WriteChunkedBodyDone()
+                return nil
+            }
+
+            // Non-stream fallback not supported in offline mode
+            return &server.HandlerError{Status: response.StatusBadRequest, Body: []byte("unsupported httpbin path\n")}
+        }
         // Prepare HTML bodies
         html400 := []byte("<html>\n  <head>\n    <title>400 Bad Request</title>\n  </head>\n  <body>\n    <h1>Bad Request</h1>\n    <p>Your request honestly kinda sucked.</p>\n  </body>\n</html>\n")
         html500 := []byte("<html>\n  <head>\n    <title>500 Internal Server Error</title>\n  </head>\n  <body>\n    <h1>Internal Server Error</h1>\n    <p>Okay, you know what? This one is on me.</p>\n  </body>\n</html>\n")

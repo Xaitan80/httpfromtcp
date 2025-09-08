@@ -137,3 +137,36 @@ func (wr *Writer) WriteBody(p []byte) (int, error) {
 
 // WroteAnything returns true if any part of the response has been written.
 func (wr *Writer) WroteAnything() bool { return wr.state != writerStateInit }
+
+// WriteChunkedBody writes a single chunk encoded as: <hex>\r\n<data>\r\n
+func (wr *Writer) WriteChunkedBody(p []byte) (int, error) {
+    if wr.state != writerStateHeaders && wr.state != writerStateBody {
+        return 0, fmt.Errorf("invalid write order: body before headers")
+    }
+    wr.state = writerStateBody
+    // chunk size in hex followed by CRLF
+    if _, err := fmt.Fprintf(wr.w, "%x\r\n", len(p)); err != nil {
+        return 0, err
+    }
+    // chunk data
+    if len(p) > 0 {
+        if _, err := wr.w.Write(p); err != nil {
+            return 0, err
+        }
+    }
+    // terminating CRLF for this chunk
+    if _, err := io.WriteString(wr.w, "\r\n"); err != nil {
+        return 0, err
+    }
+    return len(p), nil
+}
+
+// WriteChunkedBodyDone writes the terminating zero-size chunk: 0\r\n\r\n
+func (wr *Writer) WriteChunkedBodyDone() (int, error) {
+    if wr.state != writerStateHeaders && wr.state != writerStateBody {
+        return 0, fmt.Errorf("invalid write order: body before headers")
+    }
+    wr.state = writerStateBody
+    n, err := io.WriteString(wr.w, "0\r\n\r\n")
+    return n, err
+}
