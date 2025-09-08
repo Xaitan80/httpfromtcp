@@ -7,6 +7,7 @@ import (
     "net/http"
     "os"
     "os/signal"
+    "crypto/sha256"
     "strconv"
     "strings"
     "syscall"
@@ -41,8 +42,11 @@ func main() {
                 hdrs.Set("Content-Type", ct)
                 hdrs.Set("Connection", "close")
                 hdrs.Set("Transfer-Encoding", "chunked")
+                hdrs.Set("Trailer", "X-Content-SHA256, X-Content-Length")
                 _ = w.WriteHeaders(hdrs)
 
+                hasher := sha256.New()
+                var total int
                 buf := make([]byte, 1024)
                 for {
                     n, rerr := resp.Body.Read(buf)
@@ -50,6 +54,8 @@ func main() {
                         if _, werr := w.WriteChunkedBody(buf[:n]); werr != nil {
                             return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("write error\n")}
                         }
+                        _, _ = hasher.Write(buf[:n])
+                        total += n
                     }
                     if rerr == io.EOF {
                         break
@@ -58,7 +64,11 @@ func main() {
                         return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("upstream read error\n")}
                     }
                 }
-                _, _ = w.WriteChunkedBodyDone()
+                sum := hasher.Sum(nil)
+                tr := headers.NewHeaders()
+                tr.Set("X-Content-SHA256", fmt.Sprintf("%x", sum))
+                tr.Set("X-Content-Length", strconv.Itoa(total))
+                _ = w.WriteTrailers(tr)
                 return nil
             }
 
@@ -77,15 +87,25 @@ func main() {
                 hdrs.Set("Content-Type", "application/json")
                 hdrs.Set("Connection", "close")
                 hdrs.Set("Transfer-Encoding", "chunked")
+                hdrs.Set("Trailer", "X-Content-SHA256, X-Content-Length")
                 _ = w.WriteHeaders(hdrs)
+                hasher := sha256.New()
+                var total int
                 // Write n JSON lines that include the Host key to satisfy expectations
                 for i := 0; i < n; i++ {
                     line := fmt.Sprintf("{\"id\": %d, \"Host\": \"httpbin.org\"}\n", i)
-                    if _, err := w.WriteChunkedBody([]byte(line)); err != nil {
+                    b := []byte(line)
+                    if _, err := w.WriteChunkedBody(b); err != nil {
                         return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("write error\n")}
                     }
+                    _, _ = hasher.Write(b)
+                    total += len(b)
                 }
-                _, _ = w.WriteChunkedBodyDone()
+                sum := hasher.Sum(nil)
+                tr := headers.NewHeaders()
+                tr.Set("X-Content-SHA256", fmt.Sprintf("%x", sum))
+                tr.Set("X-Content-Length", strconv.Itoa(total))
+                _ = w.WriteTrailers(tr)
                 return nil
             }
 
