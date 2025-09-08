@@ -1,0 +1,32 @@
+# Go build artifacts and binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Build output directories
+bin/
+build/
+dist/
+
+# Dependency directory (optional; uncomment if you vendor)
+vendor/
+
+# Logs and coverage
+*.log
+coverage.*
+*.coverprofile
+
+# OS / Editor files
+.DS_Store
+.idea/
+.vscode/
+*.code-workspace
+
+# Temp files
+tmp/
+*.tmp
+*.swp
+*.swo
