@@ -89,12 +89,83 @@ func Test_Good_Request_Line_With_Path(t *testing.T) {
 }
 
 func Test_Good_POST_Request_With_Path(t *testing.T) {
-	r, err := RequestFromReader(strings.NewReader("POST /submit HTTP/1.1\r\nHost: localhost:42069\r\nContent-Length: 0\r\n\r\n"))
-	require.NoError(t, err)
-	require.NotNil(t, r)
-	assert.Equal(t, "POST", r.RequestLine.Method)
-	assert.Equal(t, "/submit", r.RequestLine.RequestTarget)
-	assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+    r, err := RequestFromReader(strings.NewReader("POST /submit HTTP/1.1\r\nHost: localhost:42069\r\nContent-Length: 0\r\n\r\n"))
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "POST", r.RequestLine.Method)
+    assert.Equal(t, "/submit", r.RequestLine.RequestTarget)
+    assert.Equal(t, "1.1", r.RequestLine.HttpVersion)
+}
+
+// Standard Headers
+func Test_Standard_Headers(t *testing.T) {
+    reader := &chunkReader{
+        data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\n\r\n",
+        numBytesPerRead: 3,
+    }
+    r, err := RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "localhost:42069", r.Headers["host"])
+    assert.Equal(t, "curl/7.81.0", r.Headers["user-agent"])
+    assert.Equal(t, "*/*", r.Headers["accept"])
+}
+
+// Empty Headers
+func Test_Empty_Headers(t *testing.T) {
+    reader := &chunkReader{
+        data:            "GET / HTTP/1.1\r\n\r\n",
+        numBytesPerRead: 2,
+    }
+    r, err := RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Empty(t, r.Headers)
+}
+
+// Malformed Header
+func Test_Malformed_Header(t *testing.T) {
+    reader := &chunkReader{
+        data:            "GET / HTTP/1.1\r\nHost localhost:42069\r\n\r\n",
+        numBytesPerRead: 3,
+    }
+    _, err := RequestFromReader(reader)
+    require.Error(t, err)
+}
+
+// Duplicate Headers should append values
+func Test_Duplicate_Headers(t *testing.T) {
+    reader := &chunkReader{
+        data:            "GET / HTTP/1.1\r\nCookie: a=1\r\nCookie: b=2\r\n\r\n",
+        numBytesPerRead: 4,
+    }
+    r, err := RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "a=1,b=2", r.Headers["cookie"])
+}
+
+// Case Insensitive Headers keys map to lowercase
+func Test_Case_Insensitive_Headers(t *testing.T) {
+    reader := &chunkReader{
+        data:            "GET / HTTP/1.1\r\nhOsT: localhost\r\nUSER-AGENT: test\r\n\r\n",
+        numBytesPerRead: 5,
+    }
+    r, err := RequestFromReader(reader)
+    require.NoError(t, err)
+    require.NotNil(t, r)
+    assert.Equal(t, "localhost", r.Headers["host"])
+    assert.Equal(t, "test", r.Headers["user-agent"])
+}
+
+// Missing End of Headers should error (EOF before CRLF CRLF)
+func Test_Missing_End_Of_Headers(t *testing.T) {
+    reader := &chunkReader{
+        data:            "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl\r\n", // no final CRLF CRLF
+        numBytesPerRead: 8,
+    }
+    _, err := RequestFromReader(reader)
+    require.Error(t, err)
 }
 
 func Test_Invalid_Number_Of_Parts_In_Request_Line(t *testing.T) {
