@@ -4,6 +4,8 @@ import (
     "fmt"
     "net"
     "sync/atomic"
+
+    "github.com/xaitan80/httpfromtcp/internal/response"
 )
 
 type Server struct {
@@ -54,14 +56,8 @@ func (s *Server) listen() {
 func (s *Server) handle(conn net.Conn) {
     defer conn.Close()
 
-    const body = "Hello World!\n"
-    const headers = "HTTP/1.1 200 OK\r\n" +
-        "Content-Type: text/plain\r\n" +
-        "Content-Length: 13\r\n" +
-        "\r\n"
-
-    // Write headers and body.
-    _, _ = conn.Write([]byte(headers))
-    _, _ = conn.Write([]byte(body))
+    // Default empty response with headers
+    _ = response.WriteStatusLine(conn, response.StatusOK)
+    hdrs := response.GetDefaultHeaders(0)
+    _ = response.WriteHeaders(conn, hdrs)
 }
-
