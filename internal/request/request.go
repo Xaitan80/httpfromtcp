@@ -5,10 +5,13 @@ import (
     "errors"
     "io"
     "strings"
+
+    "github.com/xaitan80/httpfromtcp/internal/headers"
 )
 
 type Request struct {
     RequestLine RequestLine
+    Headers     headers.Headers
     state       parserState
 }
 
@@ -22,7 +25,7 @@ type RequestLine struct {
 // It reads chunks and feeds them to the Request parser until the
 // request-line has been fully parsed.
 func RequestFromReader(reader io.Reader) (*Request, error) {
-    r := &Request{state: stateInitialized}
+    r := &Request{state: stateInitialized, Headers: headers.NewHeaders()}
 
     // Accumulation buffer for bytes read but not yet parsed/consumed.
     buf := make([]byte, 0, 32)
@@ -71,6 +74,7 @@ type parserState int
 
 const (
     stateInitialized parserState = iota
+    stateParsingHeaders
     stateDone
 )
 
@@ -80,16 +84,54 @@ func (r *Request) parse(data []byte) (int, error) {
     if r.state == stateDone {
         return 0, nil
     }
-    consumed, rl, err := parseRequestLine(data)
-    if err != nil {
-        return 0, err
+    total := 0
+    for {
+        n, err := r.parseSingle(data[total:])
+        if err != nil {
+            return total, err
+        }
+        if n == 0 {
+            break
+        }
+        total += n
+        if r.state == stateDone || total == len(data) {
+            break
+        }
     }
-    if consumed == 0 {
+    return total, nil
+}
+
+// parseSingle processes a single step depending on the current parser state.
+func (r *Request) parseSingle(data []byte) (int, error) {
+    switch r.state {
+    case stateInitialized:
+        consumed, rl, err := parseRequestLine(data)
+        if err != nil {
+            return 0, err
+        }
+        if consumed == 0 {
+            return 0, nil
+        }
+        r.RequestLine = rl
+        r.state = stateParsingHeaders
+        return consumed, nil
+    case stateParsingHeaders:
+        n, done, err := r.Headers.Parse(data)
+        if err != nil {
+            return 0, err
+        }
+        if n == 0 && !done {
+            return 0, nil
+        }
+        if done {
+            r.state = stateDone
+        }
+        return n, nil
+    case stateDone:
         return 0, nil
+    default:
+        return 0, errors.New("invalid parser state")
     }
-    r.RequestLine = rl
-    r.state = stateDone
-    return consumed, nil
 }
 
 // parseRequestLine attempts to parse a request-line from the beginning of data.
@@ -139,4 +181,3 @@ func parseRequestLine(data []byte) (int, RequestLine, error) {
     // consumed bytes include CRLF; lf is index of LF; consumed = lf+1
     return lf + 1, rl, nil
 }
-
