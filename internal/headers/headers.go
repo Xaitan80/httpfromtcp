@@ -68,7 +68,15 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
     key = strings.ToLower(key)
 
     // Mutate the headers map with the parsed key/value.
-    h[key] = val
+    if prev, ok := h[key]; ok {
+        if prev == "" {
+            h[key] = val
+        } else {
+            h[key] = prev + "," + val
+        }
+    } else {
+        h[key] = val
+    }
 
     // Consume exactly this line and its CRLF, not beyond.
     return idx + 2, false, nil

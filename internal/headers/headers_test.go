@@ -91,3 +91,17 @@ func Test_Invalid_Character_In_Key(t *testing.T) {
     assert.Equal(t, 0, n)
     assert.False(t, done)
 }
+
+// Test: Append value when key already exists
+func Test_Append_To_Existing_Header(t *testing.T) {
+    headers := NewHeaders()
+    headers["host"] = "alpha"
+
+    data := []byte("Host: beta\r\n\r\n")
+    n, done, err := headers.Parse(data)
+    require.NoError(t, err)
+    assert.False(t, done)
+    exp := bytes.Index(data, []byte("\r\n")) + 2
+    assert.Equal(t, exp, n)
+    assert.Equal(t, "alpha,beta", headers["host"]) // appended with comma
+}
