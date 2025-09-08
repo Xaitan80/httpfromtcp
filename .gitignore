@@ -10,6 +10,7 @@
 bin/
 build/
 dist/
+assets/
 
 # Dependency directory (optional; uncomment if you vendor)
 vendor/

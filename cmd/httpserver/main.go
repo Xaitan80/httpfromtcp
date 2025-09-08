@@ -22,6 +22,25 @@ const port = 42069
 
 func main() {
     var handler server.Handler = func(r *request.Request, w *response.Writer) *server.HandlerError {
+        // Serve a demo video at /video
+        if r.RequestLine.RequestTarget == "/video" {
+            data, err := os.ReadFile("assets/vim.mp4")
+            if err != nil {
+                return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("failed to read video\n")}
+            }
+            if err := w.WriteStatusLine(response.StatusOK); err != nil {
+                return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("write status error\n")}
+            }
+            hdrs := response.GetDefaultHeaders(len(data))
+            hdrs.Set("Content-Type", "video/mp4")
+            if err := w.WriteHeaders(hdrs); err != nil {
+                return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("write headers error\n")}
+            }
+            if _, err := w.WriteBody(data); err != nil {
+                return &server.HandlerError{Status: response.StatusInternalServerError, Body: []byte("write body error\n")}
+            }
+            return nil
+        }
         // Proxy /httpbin/* to https://httpbin.org/* with chunked transfer
         if strings.HasPrefix(r.RequestLine.RequestTarget, "/httpbin") {
             path := strings.TrimPrefix(r.RequestLine.RequestTarget, "/httpbin")
