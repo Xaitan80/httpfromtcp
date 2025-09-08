@@ -170,3 +170,29 @@ func (wr *Writer) WriteChunkedBodyDone() (int, error) {
     n, err := io.WriteString(wr.w, "0\r\n\r\n")
     return n, err
 }
+
+// WriteTrailers writes the terminating zero-size chunk followed by trailer headers and a final CRLF.
+func (wr *Writer) WriteTrailers(h headers.Headers) error {
+    if wr.state != writerStateHeaders && wr.state != writerStateBody {
+        return fmt.Errorf("invalid write order: trailers before headers")
+    }
+    wr.state = writerStateBody
+    // zero-size chunk
+    if _, err := io.WriteString(wr.w, "0\r\n"); err != nil {
+        return err
+    }
+    // Write provided trailer headers (sorted for stability)
+    keys := make([]string, 0, len(h))
+    for k := range h {
+        keys = append(keys, k)
+    }
+    sort.Strings(keys)
+    for _, k := range keys {
+        if _, err := fmt.Fprintf(wr.w, "%s: %s\r\n", k, h[k]); err != nil {
+            return err
+        }
+    }
+    // End of trailers
+    _, err := io.WriteString(wr.w, "\r\n")
+    return err
+}
