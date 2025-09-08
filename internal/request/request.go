@@ -46,6 +46,16 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
             }
         }
 
+        // Allow state transitions that don't require additional bytes (e.g., no body)
+        if len(buf) == 0 && r.state != stateDone {
+            if _, err := r.parse(nil); err != nil {
+                return nil, err
+            }
+            if r.state == stateDone {
+                return r, nil
+            }
+        }
+
         // Need more data
         n, err := reader.Read(tmp)
         if n > 0 {
