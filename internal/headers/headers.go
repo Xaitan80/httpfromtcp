@@ -14,6 +14,11 @@ func NewHeaders() Headers {
     return make(Headers)
 }
 
+// Get returns the value for the provided key, case-insensitive.
+func (h Headers) Get(key string) string {
+    return h[strings.ToLower(key)]
+}
+
 // Parse consumes at most one header line from data and updates the map.
 // It returns n (bytes consumed), done (true iff an empty line was found), and err.
 // Behavior:
