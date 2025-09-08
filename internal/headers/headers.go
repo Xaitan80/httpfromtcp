@@ -56,10 +56,20 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
         return 0, false, errors.New("invalid header: empty key")
     }
 
+    // Validate key characters (letters, digits, and '-').
+    for i := 0; i < len(key); i++ {
+        c := key[i]
+        if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+            return 0, false, errors.New("invalid header: invalid character in key")
+        }
+    }
+
+    // Normalize key to lowercase before storing.
+    key = strings.ToLower(key)
+
     // Mutate the headers map with the parsed key/value.
     h[key] = val
 
     // Consume exactly this line and its CRLF, not beyond.
     return idx + 2, false, nil
 }
-
