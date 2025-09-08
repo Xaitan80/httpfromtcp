@@ -12,6 +12,7 @@ import (
 type Request struct {
     RequestLine RequestLine
     Headers     headers.Headers
+    Body        []byte
     state       parserState
 }
 
@@ -59,10 +60,16 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
                     buf = buf[consumed:]
                 }
             }
+            // Allow state transitions that don't require additional data (e.g., no body)
+            if r.state != stateDone {
+                if _, perr := r.parse(nil); perr != nil {
+                    return nil, perr
+                }
+            }
             if r.state == stateDone {
                 return r, nil
             }
-            return nil, errors.New("incomplete request line")
+            return nil, errors.New("incomplete request")
         }
         if err != nil {
             return nil, err
@@ -75,6 +82,7 @@ type parserState int
 const (
     stateInitialized parserState = iota
     stateParsingHeaders
+    stateParsingBody
     stateDone
 )
 
@@ -124,9 +132,40 @@ func (r *Request) parseSingle(data []byte) (int, error) {
             return 0, nil
         }
         if done {
-            r.state = stateDone
+            r.state = stateParsingBody
         }
         return n, nil
+    case stateParsingBody:
+        // Determine desired content length from headers; if missing, we're done.
+        clStr := r.Headers.Get("Content-Length")
+        if clStr == "" {
+            r.state = stateDone
+            // Nothing to parse; report consuming all provided data to advance buffer.
+            return len(data), nil
+        }
+        // Parse content length
+        var want int
+        for i := 0; i < len(clStr); i++ {
+            c := clStr[i]
+            if c < '0' || c > '9' {
+                return 0, errors.New("invalid Content-Length")
+            }
+            want = want*10 + int(c-'0')
+        }
+        // Append all data given
+        if len(data) > 0 {
+            r.Body = append(r.Body, data...)
+        }
+        // If we've reached the desired length, we're done
+        if len(r.Body) == want {
+            r.state = stateDone
+        }
+        // If we've exceeded, error
+        if len(r.Body) > want {
+            return len(data), errors.New("body exceeds Content-Length")
+        }
+        // Report consumed bytes (entire slice provided)
+        return len(data), nil
     case stateDone:
         return 0, nil
     default:
